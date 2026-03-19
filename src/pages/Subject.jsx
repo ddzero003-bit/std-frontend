@@ -1,556 +1,518 @@
-import { Router } from "express";
-import pool from "../config/pg.js";
-import upload from "../middleware/upload.js";
-import fs from "fs";
-import path from "path";
+import React, { useState, useEffect } from "react";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  X,
+  Save,
+  BookOpen,
+  Loader2,
+  CheckCircle,
+  FileText,
+  Home,
+  AlertCircle,
+  Search,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import Header from "../components/header";
+import Footer from "../components/footer";
 
-const stdRoute = Router();
+export const API_URL = import.meta.env.VITE_API;
 
-// stdRoute.post("/create-std", async (req, res) => {
-//   try {
-//     const { fullName, studentId, username, password } = req.body;
-//     if (!fullName || !studentId || !username || !password)
-//       return res.status(400);
+export default function CourseCRUD() {
+  const token = JSON.parse(localStorage.getItem("loginToken"))?.data;
 
-//     const isStdExit = `select * from students where std_class_id = $1`;
-//     const findStdIdEsit = await pool.query(isStdExit, [studentId]);
-//     if (findStdIdEsit.rows.length > 0) {
-//       return res.json({
-//         err: "มีข้อมูลรหัสนักศึกษานี้อยู่แล้ว ไม่สามารถลงทะเบียนได้",
-//       });
-//     }
+  const [courses, setCourses] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCourse, setEditingCourse] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [formData, setFormData] = useState({
+    course_id: "",
+    course_name: "",
+    teacher_name: "",
+  });
 
-//     const where = `select * from users where username = $1`;
-//     const fintExitStd = await pool.query(where, [username]);
-//     if (fintExitStd.rows.length > 0)
-//       return res.json({
-//         err: "มีข้อมูล username นี้อยู่แล้ว ไม่สามารถลงทะเบียนได้",
-//       });
+  useEffect(() => {
+    fetchCourses();
+  }, []);
 
-//     const internToUser = `INSERT INTO users (username,password,role_id) 
-//                    VALUES ($1, $2, $3) RETURNING *`;
-//     const query = `INSERT INTO students (fullname,std_class_id,username,password,major) 
-//                    VALUES ($1, $2, $3, $4, $5) RETURNING *`;
+  const fetchCourses = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/get-all-subjects`);
+      const data = await response.json();
+      setCourses(data.data || []);
+    } catch (error) {
+      console.error("Error fetching courses:", error);
+      setError("ไม่สามารถโหลดข้อมูลได้");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-//     const insertUser = await pool.query(internToUser, [username, password, 1]);
-//     const result = await pool.query(query, [
-//       fullName,
-//       studentId,
-//       username,
-//       password,
-//       "IT",
-//     ]);
-//     if (!result) return res.status(400);
+  // Filter courses based on search term
+  const filteredCourses = courses.filter(course => 
+    course.course_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    course.course_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    course.teacher_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-//     return res.status(200).json({ ok: true });
-//   } catch (error) {
-//     console.log(error);
-//     res.status(500).json(error);
-//   }
-// });
+  const handleInputChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+    setError("");
+  };
 
-// stdRoute.post("/create-easy", async (req, res) => {
-//   try {
-//   } catch (error) {
-//     console.error(error);
-//   }
-// });
-
-stdRoute.post("/create-std", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { fullName, studentId, username, password } = req.body;
-
-    if (!fullName || !studentId || !username || !password) {
-      return res.status(400).json({ err: "กรอกข้อมูลไม่ครบ" });
+  const handleSubmit = async () => {
+    if (!formData.course_id || !formData.course_name || !formData.teacher_name) {
+      setError("กรุณากรอกข้อมูลให้ครบทุกช่อง");
+      return;
     }
 
-    await client.query("BEGIN");
+    try {
+      setLoading(true);
+      setError("");
 
-    // 🔹 เช็คซ้ำ student
-    const checkStd = await client.query(
-      "SELECT * FROM students WHERE std_class_id = $1",
-      [studentId]
-    );
-    if (checkStd.rows.length > 0) {
-      await client.query("ROLLBACK");
-      return res.json({ err: "มีรหัสนักศึกษานี้แล้ว" });
-    }
+      if (editingCourse) {
+        // Update existing course
+        const response = await fetch(
+          `${API_URL}/update-subject/${editingCourse.course_id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              course_name: formData.course_name,
+              teacher_name: formData.teacher_name,
+            }),
+          },
+        );
 
-    // 🔹 เช็คซ้ำ username
-    const checkUser = await client.query(
-      "SELECT * FROM users WHERE username = $1",
-      [username]
-    );
-    if (checkUser.rows.length > 0) {
-      await client.query("ROLLBACK");
-      return res.json({ err: "username ซ้ำ" });
-    }
+        if (response.ok) {
+          await fetchCourses();
+          resetForm();
+        } else {
+          const errorData = await response.json();
+          setError(errorData.error || "เกิดข้อผิดพลาด");
+        }
+      } else {
+        // Add new course
+        const response = await fetch(`${API_URL}/create-subject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        });
 
-    // 🔹 insert users
-    await client.query(
-      "INSERT INTO users (username,password,role_id) VALUES ($1,$2,$3)",
-      [username, password, 1]
-    );
-
-    // 🔹 insert students
-    await client.query(
-      `INSERT INTO students 
-  (fullname,std_class_id,username,password,major,profile) 
-  VALUES ($1,$2,$3,$4,$5,$6)`,
-      [fullName, studentId, username, password, "IT", "default.png"]
-    );
-    await client.query("COMMIT");
-
-    return res.status(200).json({ ok: true });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error(error);
-    return res.status(500).json({ err: "สมัครไม่สำเร็จ" });
-  } finally {
-    client.release();
-  }
-});
-
-// stdRoute.post("/login", async (req, res) => {
-//   try {
-//     const { username, password } = req.body;
-
-//     console.log("login:", username, password);
-
-//     let role = 1;
-//     let query = "SELECT * FROM students WHERE username = $1";
-//     let result = await pool.query(query, [username]);
-
-//     if (result.rows.length > 0) {
-//       if (result.rows[0].password !== password) {
-//         return res.status(401).json({ err: "password incorrect" });
-//       }
-//     } else {
-//       query = "SELECT * FROM professors WHERE username = $1";
-//       role = 2;
-//       result = await pool.query(query, [username]);
-
-//       if (result.rows.length === 0) {
-//         return res.status(401).json({ err: "user not found" });
-//       }
-
-//       if (result.rows[0].password !== password) {
-//         return res.status(401).json({ err: "password incorrect" });
-//       }
-//     }
-
-//     return res.status(200).json({
-//       data: { ...result.rows[0], role },
-//     });
-//   } catch (error) {
-//     console.error(error);
-//     return res.status(500).json({ err: "Internal server error" });
-//   }
-// });
-
-stdRoute.post("/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    console.log("login:", username, password);
-
-    // 🔹 1. หาใน students
-    let result = await pool.query(
-      "SELECT * FROM students WHERE username = $1",
-      [username]
-    );
-
-    if (result.rows.length > 0) {
-      if (result.rows[0].password !== password) {
-        return res.status(401).json({ err: "password incorrect" });
+        if (response.ok) {
+          await fetchCourses();
+          resetForm();
+        } else {
+          const errorData = await response.json();
+          setError(errorData.error || "เกิดข้อผิดพลาด");
+        }
       }
-
-      return res.status(200).json({
-        data: { ...result.rows[0], role: 1 },
-      });
+    } catch (error) {
+      console.error("Error saving:", error);
+      setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // 🔹 2. หาใน professors
-    result = await pool.query(
-      "SELECT * FROM professors WHERE username = $1",
-      [username]
-    );
+  const handleEdit = (course) => {
+    setEditingCourse(course);
+    setFormData({
+      course_id: course.course_id,
+      course_name: course.course_name,
+      teacher_name: course.teacher_name,
+    });
+    setError("");
+    setIsModalOpen(true);
+  };
 
-    if (result.rows.length > 0) {
-      if (result.rows[0].password !== password) {
-        return res.status(401).json({ err: "password incorrect" });
+  const handleDelete = async (courseId) => {
+    if (!window.confirm("คุณต้องการลบรายวิชานี้หรือไม่?")) return;
+
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/delete-subject/${courseId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        await fetchCourses();
+      } else {
+        setError("ไม่สามารถลบข้อมูลได้");
       }
-
-      return res.status(200).json({
-        data: { ...result.rows[0], role: 2 },
-      });
+    } catch (error) {
+      console.error("Error deleting:", error);
+      setError("ไม่สามารถลบข้อมูลได้");
+    } finally {
+      setLoading(false);
     }
-
-    // 🔹 3. หาใน users (admin หรือ user อื่น)
-    result = await pool.query(
-      "SELECT * FROM users WHERE username = $1",
-      [username]
-    );
-
-    if (result.rows.length > 0) {
-      if (result.rows[0].password !== password) {
-        return res.status(401).json({ err: "password incorrect" });
-      }
-
-      return res.status(200).json({
-        data: { ...result.rows[0], role: result.rows[0].role_id },
-      });
-    }
-
-    // ❌ ไม่เจอเลย
-    return res.status(401).json({ err: "user not found" });
-
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  }
-});
-
-stdRoute.put("/students/:id", upload.single("profile"), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { fullname, major } = req.body;
-    const filePath = req.file ? req.file.path : null;
-
-    if (!id) {
-      return res.status(400).json({ err: "กรุณาระบุ id" });
-    }
-
-    if (!fullname && !major && !filePath) {
-      return res.status(400).json({
-        err: "ต้องมีอย่างน้อย fullname หรือ major หรือ profile",
-      });
-    }
-
-    // 🔹 ดึงรูปเก่า
-    const qSelect = "SELECT profile FROM students WHERE student_id = $1";
-    const student = await pool.query(qSelect, [id]);
-
-    if (student.rows.length === 0) {
-      return res.status(404).json({ err: "ไม่พบนักเรียน" });
-    }
-
-    const oldProfile = student.rows[0].profile;
-
-    // 🔥 ลบรูปเก่า ถ้ามีการอัปโหลดรูปใหม่
-    if (filePath && oldProfile) {
-      const oldPath = path.resolve(oldProfile);
-      if (fs.existsSync(oldPath)) {
-        await fs.promises.unlink(oldPath);
-      }
-    }
-
-    // 🔹 update ข้อมูล
-    const query = `
-      UPDATE students
-      SET
-        fullname = COALESCE($1, fullname),
-        major = COALESCE($2, major),
-        profile = COALESCE($3, profile)
-      WHERE student_id = $4
-      RETURNING *
-    `;
-
-    const result = await pool.query(query, [
-      fullname,
-      major,
-      filePath,
-      Number(id),
-    ]);
-
-    return res.status(200).json({
-      ok: true,
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  }
-});
-
-stdRoute.get("/students/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({ err: "กรุณาระบุ id" });
-    }
-
-    const query = `
-      SELECT student_id, fullname, std_class_id, username, major,profile
-      FROM students
-      WHERE student_id = $1
-      LIMIT 1
-    `;
-
-    const result = await pool.query(query, [id]);
-    console.log(result.rows);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ err: "ไม่พบข้อมูลนักเรียน" });
-    }
-
-    return res.status(200).json({ data: result.rows[0] });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  }
-});
-
-stdRoute.delete("/students/:id", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({ err: "กรุณาระบุ id" });
-    }
-
-    await client.query("BEGIN");
-
-    // 1. ลบข้อมูลลูกก่อน
-    await client.query("DELETE FROM enrollments WHERE student_id = $1", [id]);
-
-    // 2. ลบนักเรียน (ต้องมี RETURNING)
-    const result = await client.query(
-      `
-      DELETE FROM students
-      WHERE student_id = $1
-      RETURNING student_id
-      `,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ err: "ไม่พบข้อมูลนักเรียน" });
-    }
-
-    await client.query("COMMIT");
-
-    return res.status(200).json({
-      ok: true,
-      msg: "ลบข้อมูลเรียบร้อย",
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  } finally {
-    client.release();
-  }
-});
-
-stdRoute.get("/students", async (req, res) => {
-  try {
-    const query = `
-   SELECT
-  student_id,
-  fullname,
-  std_class_id,
-  username,
-  major
-FROM students 
-
-    `;
-
-    const result = await pool.query(query);
-    console.log("🚀 ~ result.rows:", result.rows);
-    return res.status(200).json({
-      total: result.rows.length,
-      data: result.rows,
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  }
-});
-
-// stdRoute.post("/check-class", async (req, res) => {
-//   try {
-//     const { classId, stdId } = req.body;
-//     const filePath = req.file ? req.file.path : null;
-
-//     if (!classId || !stdId) {
-//       return res.status(400).json({ err: "ข้อมูลไม่ครบ" });
-//     }
-
-//     // 🔹 ใช้เวลา server
-//     const checkinTime = new Date();
-
-//     // 🔹 ดึงเวลาเข้าเรียนจาก courses
-//     const courseResult = await pool.query(
-//       `SELECT time_check FROM courses WHERE course_id = $1`,
-//       [classId],
-//     );
-
-//     if (courseResult.rows.length === 0) {
-//       return res.status(404).json({ err: "ไม่พบวิชาเรียน" });
-//     }
-
-//     const timeCheck = courseResult.rows[0].time_check; // TIME
-
-//     // 🔹 ดึงเฉพาะเวลา (HH:mm:ss) จาก checkinTime
-//     const checkinTimeOnly = checkinTime.toTimeString().slice(0, 8); // "HH:mm:ss"
-
-//     // 🔥 ตัดสินสถานะ
-//     const status = checkinTimeOnly > timeCheck ? "มาสาย" : "ตรงเวลา";
-
-//     // 🔹 บันทึกข้อมูล
-//     const query = `
-//         INSERT INTO attendance
-//         (course_id, student_id, checkin_time, status, leave_file)
-//         VALUES ($1, $2, NOW(), $3, $4)
-//       `;
-
-//     await pool.query(query, [classId, stdId, status, filePath]);
-
-//     res.json({
-//       ok: true,
-//       status,
-//       checkin_time: checkinTime,
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ err: "Check-in failed" });
-//   }
-// });
-
-stdRoute.post("/check-class", upload.single("leavDoc"), async (req, res) => {
-  try {
-    const { classId, stdId } = req.body;
-    const filePath = req.file ? req.file.path : null;
-
-    if (!classId || !stdId) {
-      return res.status(400).json({ err: "ข้อมูลไม่ครบ" });
-    }
-
-    // ✅ เช็คว่า enroll แล้วหรือยัง
-    const enrollCheck = await pool.query(
-      `SELECT * FROM enrollments WHERE student_id = $1 AND course_id = $2`,
-      [stdId, classId]
-    );
-
-    // 🔥 ถ้ายังไม่ enroll → สมัครให้เลย
-    if (enrollCheck.rows.length === 0) {
-      await pool.query(
-        `INSERT INTO enrollments (student_id, course_id) VALUES ($1, $2)`,
-        [stdId, classId]
-      );
-    }
-
-    const checkinTime = new Date();
-
-    const courseResult = await pool.query(
-      `SELECT time_check FROM courses WHERE course_id = $1`,
-      [classId]
-    );
-
-    if (courseResult.rows.length === 0) {
-      return res.status(404).json({ err: "ไม่พบวิชาเรียน" });
-    }
-
-    const timeCheck = courseResult.rows[0].time_check;
-    const checkinTimeOnly = checkinTime.toTimeString().slice(0, 8);
-
-    const status = checkinTimeOnly > timeCheck ? "มาสาย" : "มาเรียน";
-
-    // ✅ กันกดซ้ำ (สำคัญมาก)
-    const alreadyCheck = await pool.query(
-      `SELECT * FROM attendance 
-       WHERE student_id = $1 AND course_id = $2 AND DATE(checkin_time) = CURRENT_DATE`,
-      [stdId, classId]
-    );
-
-    if (alreadyCheck.rows.length > 0) {
-      return res.status(400).json({ err: "เช็คชื่อไปแล้ววันนี้" });
-    }
-
-    await pool.query(
-      `INSERT INTO attendance
-       (course_id, student_id, checkin_time, status, leave_file)
-       VALUES ($1, $2, NOW(), $3, $4)`,
-      [classId, stdId, status, filePath]
-    );
-
-    res.json({
-      ok: true,
-      status,
-      checkin_time: checkinTime,
-    });
-  } catch (err) {
-    console.error("🔥 CHECK CLASS ERROR:", err);
-    res.status(500).json({ err: "Check-in failed" });
-  }
-});
-
-//ลงทะเบียนวิชาเรียน
-stdRoute.post("/enroll", async (req, res) => {
-  try {
-    const { student_id, course_id } = req.body;
-
-    if (!student_id || !course_id) {
-      return res.json({ err: "ข้อมูลไม่ครบ" });
-    }
-
-    // 🔹 กันลงซ้ำ
-    const check = await pool.query(
-      "SELECT * FROM enrollments WHERE student_id=$1 AND course_id=$2",
-      [student_id, course_id]
-    );
-
-    if (check.rows.length > 0) {
-      return res.json({ err: "ลงทะเบียนแล้ว" });
-    }
-
-    // 🔹 insert
-    await pool.query(
-      "INSERT INTO enrollments (student_id, course_id) VALUES ($1,$2)",
-      [student_id, course_id]
-    );
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ err: "Enroll failed" });
-  }
-});
-
-// เพิ่ม route ใหม่: ดึง attendance วันนี้ของห้องเรียน
-stdRoute.get("/attendance-today/:classId", async (req, res) => {
-  try {
-    const { classId } = req.params;
-
-    const result = await pool.query(
-      `SELECT 
-         a.attendance_id,
-         a.student_id,
-         s.fullname,
-         s.std_class_id,
-         a.checkin_time,
-         a.status,
-         a.leave_file
-       FROM attendance a
-       JOIN students s ON s.student_id = a.student_id
-       WHERE a.course_id = $1
-         AND DATE(a.checkin_time) = CURRENT_DATE
-       ORDER BY a.checkin_time ASC`,
-      [classId]
-    );
-
-    return res.status(200).json({
-      total: result.rows.length,
-      data: result.rows,
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ err: "Internal server error" });
-  }
-});
-
-export default stdRoute;
+  };
+
+  const resetForm = () => {
+    setFormData({ course_id: "", course_name: "", teacher_name: "" });
+    setEditingCourse(null);
+    setIsModalOpen(false);
+    setError("");
+  };
+
+  return (
+    <div className="min-h-screen mt-20 bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+      <Header />
+      <Link 
+        className="mb-4 flex items-center gap-2 w-fit px-4 py-2 bg-white hover:bg-gray-50 rounded-xl shadow-md transition-all border border-gray-200" 
+        to={token?.role === "1" ? "/my-profile" : "/dashboard"}
+      >
+        <Home className="w-5 h-5 text-blue-600" />
+        <p className="font-medium text-gray-700">หน้าหลัก</p>
+      </Link>
+
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-xl">
+                <BookOpen className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800">
+                  {token?.role === "1" ? "เช็คชื่อ" : "ระบบจัดการรายวิชา"}
+                </h1>
+                {token?.role !== "1" && (
+                  <p className="text-gray-500 mt-1">
+                    จัดการข้อมูลรายวิชาและอาจารย์ผู้สอน
+                  </p>
+                )}
+              </div>
+            </div>
+            {token?.role !== "1" && (
+              <button
+                onClick={() => {
+                  setIsModalOpen(true);
+                  setError("");
+                }}
+                disabled={loading}
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl disabled:opacity-50"
+              >
+                <Plus className="w-5 h-5" />
+                เพิ่มรายวิชา
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && !isModalOpen && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-800 font-medium">{error}</p>
+          </div>
+        )}
+
+        {/* Search Bar */}
+        {courses.length > 0 && (
+          <div className="mb-6">
+            <div className="relative max-w-md">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="ค้นหารายวิชา รหัสวิชา หรือชื่ออาจารย์..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 bg-white border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none transition-all text-gray-800"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  title="ล้างการค้นหา"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-2">
+              {searchTerm ? (
+                <>
+                  พบ <strong className="text-blue-600">{filteredCourses.length}</strong> รายวิชา
+                  จากการค้นหา "<strong className="text-blue-600">{searchTerm}</strong>"
+                </>
+              ) : (
+                <>
+                  แสดง <strong className="text-blue-600">{filteredCourses.length}</strong> รายวิชา
+                </>
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Table */}
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          {loading && courses.length === 0 ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin mr-3" />
+              <span className="text-gray-600">กำลังโหลดข้อมูล...</span>
+            </div>
+          ) : courses.length === 0 ? (
+            <div className="text-center py-20">
+              <BookOpen className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 text-lg">
+                ยังไม่มีรายวิชา กรุณาเพิ่มรายวิชาใหม่
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-sm font-semibold">ลำดับ</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold">รหัสวิชา</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold">ชื่อรายวิชา</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold">อาจารย์ผู้สอน</th>
+                    <th className="px-6 py-4 text-center text-sm font-semibold">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredCourses.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="text-center py-12">
+                        <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                        <p className="text-gray-500 text-lg font-medium">
+                          ไม่พบรายวิชาที่ค้นหา
+                        </p>
+                        <p className="text-gray-400 text-sm mt-2">
+                          ลองค้นหาด้วยคำอื่น หรือ
+                          <button
+                            onClick={() => setSearchTerm("")}
+                            className="text-blue-600 hover:underline ml-1"
+                          >
+                            ล้างการค้นหา
+                          </button>
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCourses.map((course, index) => (
+                    <tr
+                      key={course.course_id}
+                      className="hover:bg-gray-50 transition-colors"
+                    >
+                      <td className="px-6 py-4 text-gray-700">{index + 1}</td>
+                      <td className="px-6 py-4">
+                        <span className="font-semibold text-blue-600">
+                          {course.course_id}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-gray-800 font-medium">
+                        {token?.role === "1" ? (
+                          <Link
+                            to={`/check-manual/${course.course_id}/${
+                              JSON.parse(localStorage.getItem("loginToken")).data?.student_id
+                            }`}
+                            className="hover:text-blue-600 hover:underline"
+                          >
+                            {course.course_name}
+                          </Link>
+                        ) : (
+                          <p>{course.course_name}</p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-gray-700">
+                        {course.teacher_name}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-center gap-2">
+                          {token?.role === "2" || token?.role === "3" ? (
+                            <>
+                              <button
+                                onClick={() => handleEdit(course)}
+                                disabled={loading}
+                                className="flex items-center gap-1 bg-amber-100 hover:bg-amber-200 text-amber-700 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                                title="แก้ไข"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                                <span className="text-sm">แก้ไข</span>
+                              </button>
+                              <button
+                                onClick={() => handleDelete(course.course_id)}
+                                disabled={loading}
+                                className="flex items-center gap-1 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                                title="ลบ"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span className="text-sm">ลบ</span>
+                              </button>
+                            </>
+                          ) : (
+                            <Link
+                              className="flex items-center gap-2 p-2 rounded-lg text-white bg-blue-500 hover:bg-blue-600 transition-colors"
+                              to={`/class-detail/${course.course_id}/${token?.student_id}`}
+                            >
+                              <FileText size={18} />
+                              รายละเอียด
+                            </Link>
+                          )}
+                          {token?.role === "2" && (
+                            <Link
+                              className="flex items-center gap-2 p-2 rounded-lg text-white bg-emerald-500 hover:bg-emerald-600 transition-colors"
+                              to={`/check-class/${course.course_id}`}
+                            >
+                              <CheckCircle size={18} />
+                              เช็คชื่อ
+                            </Link>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Table Footer */}
+          {courses.length > 0 && (
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+              <p className="text-sm text-gray-600">
+                {searchTerm ? (
+                  <>
+                    พบ{" "}
+                    <span className="font-semibold text-blue-600">
+                      {filteredCourses.length}
+                    </span>{" "}
+                    รายวิชา จากการค้นหา (ทั้งหมด {courses.length} รายวิชา)
+                  </>
+                ) : (
+                  <>
+                    แสดงทั้งหมด{" "}
+                    <span className="font-semibold text-blue-600">
+                      {courses.length}
+                    </span>{" "}
+                    รายวิชา
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Modal */}
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-6 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-white">
+                  {editingCourse ? "แก้ไขรายวิชา" : "เพิ่มรายวิชาใหม่"}
+                </h2>
+                <button
+                  onClick={resetForm}
+                  disabled={loading}
+                  className="text-white hover:bg-white hover:bg-opacity-20 p-2 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-800 font-medium">{error}</p>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    รหัสวิชา
+                  </label>
+                  <input
+                    type="text"
+                    name="course_id"
+                    value={formData.course_id}
+                    onChange={handleInputChange}
+                    disabled={editingCourse !== null || loading}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    placeholder="เช่น CS101"
+                  />
+                  {editingCourse && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      * ไม่สามารถแก้ไขรหัสวิชาได้
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    ชื่อรายวิชา
+                  </label>
+                  <input
+                    type="text"
+                    name="course_name"
+                    value={formData.course_name}
+                    onChange={handleInputChange}
+                    disabled={loading}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors disabled:opacity-50"
+                    placeholder="เช่น การเขียนโปรแกรมคอมพิวเตอร์"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    อาจารย์ผู้สอน
+                  </label>
+                  <input
+                    type="text"
+                    name="teacher_name"
+                    value={formData.teacher_name}
+                    onChange={handleInputChange}
+                    disabled={loading}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors disabled:opacity-50"
+                    placeholder="เช่น อาจารย์สมชาย"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    disabled={loading}
+                    className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium disabled:opacity-50"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={loading}
+                    className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg font-medium disabled:opacity-50"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        กำลังบันทึก...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-5 h-5" />
+                        {editingCourse ? "บันทึก" : "เพิ่ม"}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <Footer />
+    </div>
+  );
+}
